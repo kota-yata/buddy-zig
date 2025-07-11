@@ -10,11 +10,11 @@ const Block = struct {
     allocated: bool,
 };
 
-const Allocator = struct {
+pub const Allocator = struct {
     blocks: std.ArrayList(Block),
     allocator: std.mem.Allocator,
 
-    fn init(allocator: std.mem.Allocator) !Allocator {
+    pub fn init(allocator: std.mem.Allocator) !Allocator {
         var blocks = std.ArrayList(Block).init(allocator);
         try blocks.append(Block{
             .start = 0,
@@ -27,11 +27,11 @@ const Allocator = struct {
         };
     }
 
-    fn deinit(self: *Allocator) void {
+    pub fn deinit(self: *Allocator) void {
         self.blocks.deinit();
     }
 
-    fn nextPowerOf2(n: u32) u32 {
+    pub fn nextPowerOf2(n: u32) u32 {
         if (n == 0) return 1;
         var power: u32 = 1;
         while (power < n) {
@@ -40,7 +40,7 @@ const Allocator = struct {
         return power;
     }
 
-    fn allocate(self: *Allocator, requested: u32) !void {
+    pub fn allocate(self: *Allocator, requested: u32) !?u32 {
         const needed = nextPowerOf2(requested);
 
         // Find a free block large enough
@@ -56,7 +56,7 @@ const Allocator = struct {
 
         if (best_idx == null) {
             print("No suitable block found\n", .{});
-            return;
+            return null;
         }
 
         const idx = best_idx.?;
@@ -83,21 +83,24 @@ const Allocator = struct {
         // Allocate the block
         self.blocks.items[idx].allocated = true;
         print("Blocks {d}-{d} allocated:\n", .{ current_block.start, current_block.start + current_block.size - 1 });
+        return current_block.start;
     }
 
-    fn free(self: *Allocator, start: u32) !void {
+    pub fn free(self: *Allocator, start: u32) !bool {
         // Find the block to free
         var idx: ?usize = null;
+        var block_size: u32 = 0;
         for (self.blocks.items, 0..) |block, i| {
             if (block.start == start and block.allocated) {
                 idx = i;
+                block_size = block.size;
                 break;
             }
         }
 
         if (idx == null) {
             print("Block not found or not allocated\n", .{});
-            return;
+            return false;
         }
 
         // Free the block
@@ -130,7 +133,41 @@ const Allocator = struct {
             }
         }
 
-        print("Blocks {d}-{d} freed:\n", .{ start, start + self.blocks.items[idx.?].size - 1 });
+        // Find the final size of the freed block after merging
+        var final_size: u32 = block_size;
+        for (self.blocks.items) |block| {
+            if (block.start == start) {
+                final_size = block.size;
+                break;
+            }
+        }
+
+        print("Blocks {d}-{d} freed:\n", .{ start, start + final_size - 1 });
+        return true;
+    }
+
+    pub fn getTotalFreeBlocks(self: *Allocator) u32 {
+        var total: u32 = 0;
+        for (self.blocks.items) |block| {
+            if (!block.allocated) {
+                total += block.size;
+            }
+        }
+        return total;
+    }
+
+    pub fn getTotalAllocatedBlocks(self: *Allocator) u32 {
+        var total: u32 = 0;
+        for (self.blocks.items) |block| {
+            if (block.allocated) {
+                total += block.size;
+            }
+        }
+        return total;
+    }
+
+    pub fn getFragmentCount(self: *Allocator) usize {
+        return self.blocks.items.len;
     }
 
     fn display(self: *Allocator) void {
@@ -171,7 +208,7 @@ pub fn main() !void {
     buddy.display();
 
     while (true) {
-        print("Type command:\n", .{});
+        print("How many blocks do you want to allocate/free?\n", .{});
 
         if (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
             var parts = std.mem.tokenizeScalar(u8, line, ' ');
@@ -183,13 +220,13 @@ pub fn main() !void {
             } else if (cmd[0] == 'a') {
                 if (parts.next()) |num_str| {
                     const num = try std.fmt.parseInt(u32, num_str, 10);
-                    try buddy.allocate(num);
+                    _ = try buddy.allocate(num);
                     buddy.display();
                 }
             } else if (cmd[0] == 'f') {
                 if (parts.next()) |addr_str| {
                     const addr = try std.fmt.parseInt(u32, addr_str, 10);
-                    try buddy.free(addr);
+                    _ = try buddy.free(addr);
                     buddy.display();
                 }
             }
